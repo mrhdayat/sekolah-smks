@@ -14,6 +14,9 @@ export type SchoolProfile = Database['public']['Tables']['school_profile']['Row'
 export type SchoolProfileInsert = Database['public']['Tables']['school_profile']['Insert']
 export type SchoolProfileUpdate = Database['public']['Tables']['school_profile']['Update']
 
+export type VisiMisi = { visi: string; misi: string[]; }
+export type PpdbStep = { id: string; title: string; description?: string; start_date?: string; end_date?: string; document_url?: string; order_position: number; created_at: string; }
+export type Document = { id: string; title: string; description?: string; file_url: string; category: string; file_size_kb?: number; created_at: string; }
 // New types for additional features
 export type Agenda = {
   id: string
@@ -26,6 +29,17 @@ export type Agenda = {
   image_url?: string
   is_featured: boolean
   created_at: string
+}
+
+export type Message = {
+    id: string;
+    name: string;
+    email: string;
+    phone?: string;
+    subject: string;
+    message: string;
+    is_read: boolean;
+    created_at: string;
 }
 
 export type News = {
@@ -45,6 +59,7 @@ export type StaffTeacher = {
   id: string
   name: string
   position: string
+  department: string
   education: string
   subjects: string[]
   phone?: string
@@ -133,29 +148,35 @@ export type SchoolStats = {
 
 // File Upload Service
 export const fileUploadService = {
-  async uploadFile(file: File, bucket: string = 'uploads', folder: string = '') {
+  async uploadFile(file: File, folder: string = 'uploads') {
     const fileExt = file.name.split('.').pop()
-    const fileName = `${folder}${folder ? '/' : ''}${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+    const filePath = `${folder}/${fileName}`
     
     const { data, error } = await supabase.storage
-      .from(bucket)
-      .upload(fileName, file)
+      .from('uploads') // Nama bucket utama kita
+      .upload(filePath, file)
     
     if (error) throw error
     
     const { data: { publicUrl } } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(fileName)
+      .from('uploads')
+      .getPublicUrl(filePath)
     
-    return { fileName, publicUrl }
+    return { fileName: filePath, publicUrl }
   },
 
-  async deleteFile(fileName: string, bucket: string = 'uploads') {
+  async deleteFile(filePath: string) {
     const { error } = await supabase.storage
-      .from(bucket)
-      .remove([fileName])
+      .from('uploads')
+      .remove([filePath])
     
-    if (error) throw error
+    // Jangan throw error jika file tidak ditemukan, anggap saja sudah terhapus
+    if (error && error.message !== 'The resource was not found') {
+      console.error("Gagal menghapus file lama:", error);
+      // Anda bisa memilih untuk throw error di sini jika ingin proses berhenti
+      // throw error; 
+    }
   }
 }
 
@@ -334,21 +355,25 @@ export const newsService = {
     const { data, error } = await supabase
       .from('news')
       .select('*')
-      .order('published_at', { ascending: false })
+      .order('published_at', { ascending: false });
     
-    if (error) throw error
-    return data as News[]
+    if (error) throw error;
+    return data as News[];
   },
 
-  async getPublished() {
-    const { data, error } = await supabase
+  async getPublished(page: number = 1, pageSize: number = 6) {
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, error, count } = await supabase
       .from('news')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('is_published', true)
       .order('published_at', { ascending: false })
+      .range(from, to);
     
-    if (error) throw error
-    return data as News[]
+    if (error) throw error;
+    return { data: data as News[], count: count || 0 };
   },
 
   async getById(id: string) {
@@ -356,21 +381,21 @@ export const newsService = {
       .from('news')
       .select('*')
       .eq('id', id)
-      .single()
+      .single();
     
-    if (error) throw error
-    return data as News
+    if (error) throw error;
+    return data as News;
   },
 
-  async create(news: Omit<News, 'id' | 'created_at'>) {
+  async create(news: Omit<News, 'id' | 'created_at' | 'published_at'>) {
     const { data, error } = await supabase
       .from('news')
-      .insert([news])
+      .insert([{...news, published_at: new Date().toISOString()}])
       .select()
-      .single()
+      .single();
     
-    if (error) throw error
-    return data as News
+    if (error) throw error;
+    return data as News;
   },
 
   async update(id: string, news: Partial<News>) {
@@ -379,21 +404,22 @@ export const newsService = {
       .update(news)
       .eq('id', id)
       .select()
-      .single()
+      .single();
     
-    if (error) throw error
-    return data as News
+    if (error) throw error;
+    return data as News;
   },
 
   async delete(id: string) {
     const { error } = await supabase
       .from('news')
       .delete()
-      .eq('id', id)
+      .eq('id', id);
     
-    if (error) throw error
+    if (error) throw error;
   }
-}
+};
+
 
 // Staff Teachers CRUD
 export const staffTeachersService = {
@@ -508,6 +534,32 @@ export const programsService = {
     return data as Program[]
   },
 
+  // --- FUNGSI BARU DITAMBAHKAN DI SINI ---
+  async getByCode(code: string) {
+    const { data, error } = await supabase
+      .from('programs')
+      .select('*')
+      .eq('code', code)
+      .single()
+    
+    if (error) throw error
+    return data as Program
+  },
+
+  async getLatest(limit: number = 3) {
+    const { data, error } = await supabase
+      .from('programs')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    
+    if (error) throw error
+    return data as Program[]
+  },
+
+  // --- AKHIR FUNGSI BARU ---
+
   async create(program: Omit<Program, 'id' | 'created_at'>) {
     const { data, error } = await supabase
       .from('programs')
@@ -540,6 +592,7 @@ export const programsService = {
     if (error) throw error
   }
 }
+
 
 // Extracurricular CRUD
 export const extracurricularService = {
@@ -597,7 +650,9 @@ export const extracurricularService = {
   }
 }
 
-// Testimonials CRUD
+// =======================================================
+// INI ADALAH BAGIAN YANG BERUBAH
+// =======================================================
 export const testimonialsService = {
   async getAll() {
     const { data, error } = await supabase
@@ -632,15 +687,16 @@ export const testimonialsService = {
     return data as Testimonial[]
   },
 
-  async create(testimonial: Omit<Testimonial, 'id' | 'created_at'>) {
-    const { data, error } = await supabase
-      .from('testimonials')
-      .insert([testimonial])
-      .select()
-      .single()
+  // Fungsi create sekarang memanggil RPC, bukan .insert()
+  async create(testimonial: Omit<Testimonial, 'id' | 'created_at' | 'is_approved' | 'is_featured'>) {
+    const { error } = await supabase.rpc('create_testimonial', {
+      name: testimonial.name,
+      role: testimonial.role,
+      content: testimonial.content,
+      rating: testimonial.rating,
+    })
     
     if (error) throw error
-    return data as Testimonial
   },
 
   async update(id: string, testimonial: Partial<Testimonial>) {
@@ -664,6 +720,10 @@ export const testimonialsService = {
     if (error) throw error
   }
 }
+// =======================================================
+// AKHIR DARI BAGIAN YANG BERUBAH
+// =======================================================
+
 
 // Leadership CRUD
 export const leadershipService = {
@@ -810,6 +870,104 @@ export const schoolProfileService = {
     return data
   }
 }
+export const messagesService = {
+  async getAll() {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data as Message[];
+  },
+
+  async create(message: Omit<Message, 'id' | 'created_at' | 'is_read'>) {
+    const { data, error } = await supabase
+      .from('messages')
+      .insert([message])
+      .select()
+      .single();
+    if (error) throw error;
+    return data as Message;
+  },
+
+  async update(id: string, updates: Partial<Message>) {
+    const { data, error } = await supabase
+      .from('messages')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as Message;
+  },
+
+  async delete(id: string) {
+    const { error } = await supabase
+      .from('messages')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  },
+};
+
+export const visiMisiService = {
+  async get() {
+    const { data, error } = await supabase
+      .from('school_profile')
+      .select('content')
+      .eq('section', 'visi_misi')
+      .single();
+    if (error && error.code !== 'PGRST116') throw error;
+    return data?.content as VisiMisi | null;
+  },
+  async upsert(content: VisiMisi) {
+    const { data, error } = await supabase
+      .from('school_profile')
+      .upsert({ section: 'visi_misi', content }, { onConflict: 'section' });
+    if (error) throw error;
+    return data;
+  }
+};
+
+// Service untuk Tahapan PPDB
+export const ppdbStepsService = {
+  async getAll() {
+    const { data, error } = await supabase.from('ppdb_steps').select('*').order('order_position', { ascending: true });
+    if (error) throw error; return data as PpdbStep[];
+  },
+  async create(step: Omit<PpdbStep, 'id' | 'created_at'>) {
+    const { data, error } = await supabase.from('ppdb_steps').insert(step).select().single();
+    if (error) throw error; return data;
+  },
+  async update(id: string, updates: Partial<PpdbStep>) {
+    const { data, error } = await supabase.from('ppdb_steps').update(updates).eq('id', id).select().single();
+    if (error) throw error; return data;
+  },
+  async delete(id: string) {
+    const { error } = await supabase.from('ppdb_steps').delete().eq('id', id);
+    if (error) throw error;
+  }
+};
+
+// Service untuk Pusat Dokumen
+export const documentsService = {
+  async getAll() {
+    const { data, error } = await supabase.from('documents').select('*').order('created_at', { ascending: false });
+    if (error) throw error; return data as Document[];
+  },
+  async create(doc: Omit<Document, 'id' | 'created_at'>) {
+    const { data, error } = await supabase.from('documents').insert(doc).select().single();
+    if (error) throw error; return data;
+  },
+  async update(id: string, updates: Partial<Document>) {
+    const { data, error } = await supabase.from('documents').update(updates).eq('id', id).select().single();
+    if (error) throw error; return data;
+  },
+  async delete(id: string) {
+    const { error } = await supabase.from('documents').delete().eq('id', id);
+    if (error) throw error;
+  }
+};
 
 // Statistics
 export const statisticsService = {

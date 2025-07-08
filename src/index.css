@@ -159,3 +159,22 @@ html {
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 300ms;
 }
+
+/* ======================================================= */
+/* BAGIAN YANG DIPERBAIKI                                  */
+/* ======================================================= */
+
+/* Variabel warna default (akan ditimpa oleh JavaScript) */
+:root {
+  --color-primary-light: #60a5fa;
+  --color-primary-default: #3b82f6;
+  --color-primary-dark: #2563eb;
+}
+
+/* Karena kita sudah mendefinisikan 'primary' di tailwind.config.js,
+  kita tidak perlu lagi mendefinisikan .bg-primary atau .text-primary di sini.
+  Tailwind akan membuatnya secara otomatis.
+  
+  Anda bisa langsung menggunakan kelas seperti 'bg-primary', 'text-primary', 
+  'hover:bg-primary-dark' di dalam file JSX Anda.
+*/
